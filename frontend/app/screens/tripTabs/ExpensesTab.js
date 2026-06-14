@@ -87,14 +87,14 @@ export default function ExpensesTab({
         <View style={tripsStyles.expenseSummaryRow}>
           <Text style={tripsStyles.expenseSummaryLabel}>Budget</Text>
           <Text style={tripsStyles.expenseSummaryValue}>
-            ${budget.toFixed(2)}
+            {budget.toFixed(2)} RON
           </Text>
         </View>
 
         <View style={tripsStyles.expenseSummaryRow}>
           <Text style={tripsStyles.expenseSummaryLabel}>Spent</Text>
           <Text style={tripsStyles.expenseSummaryValue}>
-            ${totalSpent.toFixed(2)}
+            {totalSpent.toFixed(2)} RON
           </Text>
         </View>
 

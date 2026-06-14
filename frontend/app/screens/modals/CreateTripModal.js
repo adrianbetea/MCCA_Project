@@ -35,6 +35,7 @@ export default function CreateTripModal({ visible, onClose, onSuccess, userId })
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const [tempStartDate, setTempStartDate] = useState(new Date());
   const [tempEndDate, setTempEndDate] = useState(new Date());
+  const [loading, setLoading] = useState(false);
 
   const resetForm = () => {
     const todayStr = getTodayString();
@@ -46,6 +47,7 @@ export default function CreateTripModal({ visible, onClose, onSuccess, userId })
     setTempEndDate(today);
     setBudget("");
     setDescription("");
+    setLoading(false);
   };
 
   const handleStartDateChange = (event, selectedDate) => {
@@ -76,11 +78,17 @@ export default function CreateTripModal({ visible, onClose, onSuccess, userId })
       return;
     }
 
+    if (!startDate || !endDate) {
+      Alert.alert("Error", "Please select start and end dates");
+      return;
+    }
+
     if (endDate < startDate) {
       Alert.alert("Error", "End date must be after start date");
       return;
     }
 
+    setLoading(true);
     try {
       const result = await createTrip(
         destination.trim(),
@@ -98,25 +106,20 @@ export default function CreateTripModal({ visible, onClose, onSuccess, userId })
       }
     } catch (error) {
       Alert.alert("Error", "Failed to create trip");
+    } finally {
+      setLoading(false);
     }
   };
 
-  return (
-    <Modal
-      visible={visible}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <View style={tripsStyles.modalOverlay}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'position'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-            style={{ flex: 1, justifyContent: 'center' }}
-          >
-            <View style={tripsStyles.modalContent}>
-              <ScrollView ref={scrollViewRef} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+  const content = (
+    <View style={tripsStyles.modalOverlay}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'position'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        style={{ flex: 1, justifyContent: 'center' }}
+      >
+        <View style={tripsStyles.modalContent}>
+          <ScrollView ref={scrollViewRef} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <Text style={tripsStyles.modalTitle}>Create New Trip</Text>
 
             <Text style={tripsStyles.inputLabel}>Destination *</Text>
@@ -128,41 +131,106 @@ export default function CreateTripModal({ visible, onClose, onSuccess, userId })
             />
 
             <Text style={tripsStyles.inputLabel}>Start Date *</Text>
-            <TouchableOpacity
-              style={tripsStyles.input}
-              onPress={() => setShowStartDatePicker(true)}
-            >
-              <Text style={{ fontSize: 16, color: '#333', paddingVertical: 2 }}>
-                {startDate}
-              </Text>
-            </TouchableOpacity>
-
-            {showStartDatePicker && (
-              <DateTimePicker
-                value={tempStartDate}
-                mode="date"
-                display="default"
-                onChange={handleStartDateChange}
+            {Platform.OS === 'web' ? (
+              <input
+                type="date"
+                style={{
+                  backgroundColor: '#f5f5f5',
+                  borderRadius: 10,
+                  padding: 12,
+                  fontSize: 16,
+                  marginBottom: 10,
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: '#ddd',
+                  fontFamily: 'inherit',
+                  width: '100%',
+                  boxSizing: 'border-box'
+                }}
+                value={startDate}
+                onFocus={() => setStartDate('')}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setStartDate(val);
+                  const [year, month, day] = val.split('-').map(Number);
+                  if (year && month && day) {
+                    setTempStartDate(new Date(year, month - 1, day));
+                  }
+                }}
+                disabled={loading}
               />
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={tripsStyles.input}
+                  onPress={() => setShowStartDatePicker(true)}
+                  disabled={loading}
+                >
+                  <Text style={{ fontSize: 16, color: '#333', paddingVertical: 2 }}>
+                    {startDate}
+                  </Text>
+                </TouchableOpacity>
+
+                {showStartDatePicker && (
+                  <DateTimePicker
+                    value={tempStartDate}
+                    mode="date"
+                    display="default"
+                    onChange={handleStartDateChange}
+                  />
+                )}
+              </>
             )}
 
             <Text style={tripsStyles.inputLabel}>End Date *</Text>
-            <TouchableOpacity
-              style={tripsStyles.input}
-              onPress={() => setShowEndDatePicker(true)}
-            >
-              <Text style={{ fontSize: 16, color: '#333', paddingVertical: 2 }}>
-                {endDate}
-              </Text>
-            </TouchableOpacity>
-
-            {showEndDatePicker && (
-              <DateTimePicker
-                value={tempEndDate}
-                mode="date"
-                display="default"
-                onChange={handleEndDateChange}
+            {Platform.OS === 'web' ? (
+              <input
+                type="date"
+                style={{
+                  backgroundColor: '#f5f5f5',
+                  borderRadius: 10,
+                  padding: 12,
+                  fontSize: 16,
+                  marginBottom: 10,
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: '#ddd',
+                  fontFamily: 'inherit',
+                  width: '100%',
+                  boxSizing: 'border-box'
+                }}
+                value={endDate}
+                onFocus={() => setEndDate('')}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setEndDate(val);
+                  const [year, month, day] = val.split('-').map(Number);
+                  if (year && month && day) {
+                    setTempEndDate(new Date(year, month - 1, day));
+                  }
+                }}
+                disabled={loading}
               />
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={tripsStyles.input}
+                  onPress={() => setShowEndDatePicker(true)}
+                >
+                  <Text style={{ fontSize: 16, color: '#333', paddingVertical: 2 }}>
+                    {endDate}
+                  </Text>
+                </TouchableOpacity>
+
+                {showEndDatePicker && (
+                  <DateTimePicker
+                    value={tempEndDate}
+                    mode="date"
+                    display="default"
+                    onChange={handleEndDateChange}
+                  />
+                )}
+              </>
             )}
 
             <Text style={tripsStyles.inputLabel}>Budget</Text>
@@ -196,22 +264,41 @@ export default function CreateTripModal({ visible, onClose, onSuccess, userId })
                   resetForm();
                   onClose();
                 }}
+                disabled={loading}
               >
                 <Text style={tripsStyles.modalButtonText}>Cancel</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[tripsStyles.modalButton, tripsStyles.submitButton]}
+                style={[tripsStyles.modalButton, tripsStyles.submitButton, loading && { opacity: 0.5 }]}
                 onPress={handleCreate}
+                disabled={loading}
               >
-                <Text style={tripsStyles.modalButtonText}>Create</Text>
+                <Text style={tripsStyles.modalButtonText}>
+                  {loading ? "Creating..." : "Create"}
+                </Text>
               </TouchableOpacity>
             </View>
-              </ScrollView>
-            </View>
-          </KeyboardAvoidingView>
+          </ScrollView>
         </View>
-      </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
+    </View>
+  );
+
+  return (
+    <Modal
+      visible={visible}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      {Platform.OS === 'web' ? (
+        content
+      ) : (
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          {content}
+        </TouchableWithoutFeedback>
+      )}
     </Modal>
   );
 }

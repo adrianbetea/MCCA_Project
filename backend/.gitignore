@@ -1,2 +1,6 @@
 .env
-nodde_modules
+*.env
+node_modules/
+uploads/
+config/firebase-service-account.json
+config/local_firestore_db.json

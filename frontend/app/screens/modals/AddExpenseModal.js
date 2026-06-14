@@ -39,15 +39,18 @@ export default function AddExpenseModal({
   const [description, setDescription] = useState("");
   const [expenseDate, setExpenseDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const resetForm = () => {
     setCategory("Food & Dining");
     setAmount("");
     setDescription("");
     setExpenseDate(new Date());
+    setLoading(false);
   };
 
   const formatDateDisplay = (date) => {
+    if (!date) return "";
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
@@ -67,6 +70,11 @@ export default function AddExpenseModal({
       return;
     }
 
+    if (!expenseDate) {
+      Alert.alert("Error", "Please select a date");
+      return;
+    }
+
     const expenseData = {
       category,
       amount: parseFloat(amount),
@@ -74,6 +82,7 @@ export default function AddExpenseModal({
       expenseDate: formatDateDisplay(expenseDate),
     };
 
+    setLoading(true);
     try {
       const result = await addExpense(tripId, expenseData);
       if (result.error) {
@@ -84,25 +93,20 @@ export default function AddExpenseModal({
       }
     } catch (error) {
       Alert.alert("Error", "Failed to add expense");
+    } finally {
+      setLoading(false);
     }
   };
 
-  return (
-    <Modal
-      visible={visible}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <View style={tripsStyles.modalOverlay}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'position'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-            style={{ flex: 1, justifyContent: 'center' }}
-          >
-            <View style={tripsStyles.modalContent}>
-              <ScrollView ref={scrollViewRef} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+  const content = (
+    <View style={tripsStyles.modalOverlay}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'position'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        style={{ flex: 1, justifyContent: 'center' }}
+      >
+        <View style={tripsStyles.modalContent}>
+          <ScrollView ref={scrollViewRef} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <Text style={tripsStyles.modalTitle}>Add Expense</Text>
 
             <Text style={tripsStyles.inputLabel}>Category *</Text>
@@ -131,22 +135,55 @@ export default function AddExpenseModal({
             </View>
 
             <Text style={tripsStyles.inputLabel}>Date *</Text>
-            <TouchableOpacity
-              style={tripsStyles.input}
-              onPress={() => setShowDatePicker(true)}
-            >
-              <Text style={{ fontSize: 16, color: '#333', paddingVertical: 2 }}>
-                {formatDateDisplay(expenseDate)}
-              </Text>
-            </TouchableOpacity>
-
-            {showDatePicker && (
-              <DateTimePicker
-                value={expenseDate}
-                mode="date"
-                display="default"
-                onChange={handleDateChange}
+            {Platform.OS === 'web' ? (
+              <input
+                type="date"
+                style={{
+                  backgroundColor: '#f5f5f5',
+                  borderRadius: 10,
+                  padding: 12,
+                  fontSize: 16,
+                  marginBottom: 10,
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: '#ddd',
+                  fontFamily: 'inherit',
+                  width: '100%',
+                  boxSizing: 'border-box'
+                }}
+                value={formatDateDisplay(expenseDate)}
+                onFocus={() => setExpenseDate(null)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const [year, month, day] = val.split('-').map(Number);
+                  if (year && month && day) {
+                    setExpenseDate(new Date(year, month - 1, day));
+                  } else {
+                    setExpenseDate(null);
+                  }
+                }}
+                disabled={loading}
               />
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={tripsStyles.input}
+                  onPress={() => setShowDatePicker(true)}
+                >
+                  <Text style={{ fontSize: 16, color: '#333', paddingVertical: 2 }}>
+                    {formatDateDisplay(expenseDate)}
+                  </Text>
+                </TouchableOpacity>
+
+                {showDatePicker && (
+                  <DateTimePicker
+                    value={expenseDate}
+                    mode="date"
+                    display="default"
+                    onChange={handleDateChange}
+                  />
+                )}
+              </>
             )}
 
             <Text style={tripsStyles.inputLabel}>Description</Text>
@@ -169,22 +206,41 @@ export default function AddExpenseModal({
                   resetForm();
                   onClose();
                 }}
+                disabled={loading}
               >
                 <Text style={tripsStyles.modalButtonText}>Cancel</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[tripsStyles.modalButton, tripsStyles.submitButton]}
+                style={[tripsStyles.modalButton, tripsStyles.submitButton, loading && { opacity: 0.5 }]}
                 onPress={handleAdd}
+                disabled={loading}
               >
-                <Text style={tripsStyles.modalButtonText}>Add</Text>
+                <Text style={tripsStyles.modalButtonText}>
+                  {loading ? "Adding..." : "Add"}
+                </Text>
               </TouchableOpacity>
             </View>
-              </ScrollView>
-            </View>
-          </KeyboardAvoidingView>
+          </ScrollView>
         </View>
-      </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
+    </View>
+  );
+
+  return (
+    <Modal
+      visible={visible}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      {Platform.OS === 'web' ? (
+        content
+      ) : (
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          {content}
+        </TouchableWithoutFeedback>
+      )}
     </Modal>
   );
 }

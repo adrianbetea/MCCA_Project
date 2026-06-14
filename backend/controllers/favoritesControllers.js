@@ -1,4 +1,4 @@
-const pool = require('../config/db');
+const { db } = require('../config/firebase');
 require("dotenv").config();
 
 const addToFavorites = async (req, res) => {
@@ -6,21 +6,22 @@ const addToFavorites = async (req, res) => {
     const { placeId } = req.body;
 
     try {
-        const [rows] = await pool.query( //rows = array of objects
-            "SELECT * FROM favorites WHERE placeId = ? AND userId = ?",
-            [placeId, userId]
-        );
+        const snapshot = await db.collection("favorites")
+            .where("placeId", "==", placeId)
+            .where("userId", "==", userId)
+            .get();
 
-        //check if place is in database already
-        if (rows.length > 0) {
+        // Check if place is already in favorites
+        if (!snapshot.empty) {
             res.status(500).json({ message: "The place is already added to favorites" });
             return;
         }
 
-        await pool.query(
-            'INSERT INTO favorites (userId, placeId) VALUES (?, ?)',
-            [userId, placeId]
-        );
+        // Add to Firestore
+        await db.collection("favorites").add({
+            userId,
+            placeId
+        });
 
         res.status(200).json({ message: 'Place added to favorites successfully.' });
     } catch (err) {
@@ -32,10 +33,14 @@ const getFavorites = async (req, res) => {
     const userId = req.user.userId; // Get from JWT token
 
     try {
-        const [favorites] = await pool.query( //rows = array of objects
-            "SELECT * FROM favorites WHERE userId = ?",
-            [userId]
-        );
+        const snapshot = await db.collection("favorites")
+            .where("userId", "==", userId)
+            .get();
+
+        const favorites = [];
+        snapshot.forEach(doc => {
+            favorites.push(doc.data());
+        });
 
         res.status(200).json(favorites);
     } catch (err) {
@@ -48,19 +53,17 @@ const deleteFavorite = async (req, res) => {
     const { placeId } = req.body;
 
     try {
-        const [rows] = await pool.query(
-            'SELECT * FROM favorites WHERE userId = ? AND placeId = ?',
-            [userId, placeId]
-        );
+        const snapshot = await db.collection("favorites")
+            .where("userId", "==", userId)
+            .where("placeId", "==", placeId)
+            .get();
 
-        if (rows.length === 0) { //if record doesnt exist
+        if (snapshot.empty) {
             return res.status(404).json({ message: 'Favorite not found' });
         }
 
-        await pool.execute(
-            'DELETE FROM favorites WHERE userId = ? AND placeId = ?',
-            [userId, placeId]
-        );
+        // Delete from Firestore
+        await db.collection("favorites").doc(snapshot.docs[0].id).delete();
 
         res.status(200).json({ message: 'Place deleted from favorites successfully.' });
     } catch (err) {

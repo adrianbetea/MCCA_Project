@@ -9,9 +9,11 @@ import { useNavigation } from "@react-navigation/native";
 import { tripsStyles } from "../../styles/TripsStyles";
 import { deleteItineraryItem, updateItineraryItem } from "../../functions/tripsFunctions";
 import AddItineraryModal from "../modals/AddItineraryModal";
+import AIGeneratorModal from "../modals/AIGeneratorModal";
 
 export default function ItineraryTab({ tripId, userId, items, trip, onUpdate }) {
   const [addModalVisible, setAddModalVisible] = useState(false);
+  const [aiModalVisible, setAiModalVisible] = useState(false);
   const navigation = useNavigation();
 
   const groupItemsByDay = () => {
@@ -124,6 +126,15 @@ export default function ItineraryTab({ tripId, userId, items, trip, onUpdate }) 
           </Text>
         </TouchableOpacity>
 
+        <TouchableOpacity
+          style={[tripsStyles.addItineraryButton, { backgroundColor: '#4CAF50', marginTop: 10 }]}
+          onPress={() => setAiModalVisible(true)}
+        >
+          <Text style={tripsStyles.addItineraryButtonText}>
+            🤖 Generate Itinerary with AI
+          </Text>
+        </TouchableOpacity>
+
         <AddItineraryModal
           visible={addModalVisible}
           onClose={() => setAddModalVisible(false)}
@@ -133,6 +144,17 @@ export default function ItineraryTab({ tripId, userId, items, trip, onUpdate }) 
           }}
           tripId={tripId}
           userId={userId}
+          trip={trip}
+        />
+
+        <AIGeneratorModal
+          visible={aiModalVisible}
+          onClose={() => setAiModalVisible(false)}
+          onSuccess={() => {
+            setAiModalVisible(false);
+            onUpdate();
+          }}
+          tripId={tripId}
           trip={trip}
         />
       </View>
@@ -198,6 +220,13 @@ export default function ItineraryTab({ tripId, userId, items, trip, onUpdate }) 
         <Text style={tripsStyles.addItineraryButtonText}>+ Add Activity</Text>
       </TouchableOpacity>
 
+      <TouchableOpacity
+        style={[tripsStyles.addItineraryButton, { backgroundColor: '#4CAF50', marginTop: 10 }]}
+        onPress={() => setAiModalVisible(true)}
+      >
+        <Text style={tripsStyles.addItineraryButtonText}>🤖 Generate Itinerary with AI</Text>
+      </TouchableOpacity>
+
       <AddItineraryModal
         visible={addModalVisible}
         onClose={() => setAddModalVisible(false)}
@@ -207,6 +236,17 @@ export default function ItineraryTab({ tripId, userId, items, trip, onUpdate }) 
         }}
         tripId={tripId}
         userId={userId}
+        trip={trip}
+      />
+
+      <AIGeneratorModal
+        visible={aiModalVisible}
+        onClose={() => setAiModalVisible(false)}
+        onSuccess={() => {
+          setAiModalVisible(false);
+          onUpdate();
+        }}
+        tripId={tripId}
         trip={trip}
       />
     </View>

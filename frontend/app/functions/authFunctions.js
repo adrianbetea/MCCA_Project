@@ -1,4 +1,4 @@
-import * as SecureStore from "expo-secure-store";
+import * as SecureStore from "./secureStore";
 import Constants from 'expo-constants';
 
 const API_URL = Constants.expoConfig.extra.API_URL;
@@ -48,6 +48,29 @@ export const register = async (username, email, password) => {
     }
   } catch (error) {
     console.error("Register error:", error);
+    throw error;
+  }
+};
+
+export const googleLogin = async (idToken, email, username) => {
+  try {
+    const body = { idToken, email, username };
+    const response = await fetch(`${API_URL}/google-login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await response.json();
+    if (response.ok) {
+      return data;
+    } else {
+      return { error: data.message || "Google sign-in failed" };
+    }
+  } catch (error) {
+    console.error("Google login error:", error);
     throw error;
   }
 };

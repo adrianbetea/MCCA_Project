@@ -1,7 +1,7 @@
 // GooglePlacesService.js
 import axios from "axios";
 import Constants from 'expo-constants';
-import * as SecureStore from "expo-secure-store";
+import * as SecureStore from "./secureStore";
 
 const API_URL = Constants.expoConfig.extra.API_URL;
 

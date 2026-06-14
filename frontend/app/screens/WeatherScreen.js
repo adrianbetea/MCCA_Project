@@ -16,7 +16,7 @@ import {
   getNearbyPlaces,
   getPlacePhotoUrl,
 } from "../functions/googlePlacesFunction";
-import * as SecureStore from "expo-secure-store";
+import * as SecureStore from "../functions/secureStore";
 import axios from "axios";
 import Constants from 'expo-constants';
 

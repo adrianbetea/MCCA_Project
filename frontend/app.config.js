@@ -42,11 +42,13 @@ export default ({ config }) => ({
     extra: {
       GOOGLE_PLACES_API: process.env.GOOGLE_PLACES_API,
       WEATHER_API: process.env.WEATHER_API,
-      API_URL: process.env.API_URL
+      API_URL: process.env.API_URL,
+      GOOGLE_WEB_CLIENT_ID: process.env.GOOGLE_WEB_CLIENT_ID
     },
 
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-web-browser"
     ]
   }
 });

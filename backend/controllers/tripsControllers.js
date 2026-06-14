@@ -1,38 +1,60 @@
-const pool = require('../config/db');
+const { v4: uuid } = require("uuid");
+const { db, savePublicTrip, getPublicTrips } = require('../config/firebase');
+const { uploadCoverPhoto } = require('../config/s3');
+
+// Helper to normalize and format dates safely across all database/SDK types
+const formatDateString = (dateVal) => {
+  if (!dateVal) return '';
+  if (typeof dateVal === 'string') {
+    return dateVal.split(/[T ]/)[0];
+  }
+  if (dateVal.toDate && typeof dateVal.toDate === 'function') {
+    dateVal = dateVal.toDate();
+  }
+  if (dateVal instanceof Date) {
+    const year = dateVal.getFullYear();
+    const month = String(dateVal.getMonth() + 1).padStart(2, '0');
+    const day = String(dateVal.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  return dateVal.toString();
+};
 
 // Get all trips for a user
 const getUserTrips = async (req, res) => {
-  const userId = req.user.userId; // Get from JWT token
+  const userId = req.user.userId;
 
   try {
-    const [trips] = await pool.query(
-      `SELECT t.*, 
-        COALESCE((SELECT SUM(e.amount) FROM expenses e WHERE e.tripId = t.tripId), 0) as totalSpent,
-        COALESCE((SELECT COUNT(*) FROM itinerary_items i WHERE i.tripId = t.tripId), 0) as itineraryCount
-       FROM trips t
-       WHERE t.userId = ?
-       ORDER BY t.startDate ASC`,
-      [userId]
-    );
+    const tripsSnapshot = await db.collection("trips").where("userId", "==", userId).get();
+    const trips = [];
 
-    // Format dates to YYYY-MM-DD to avoid timezone issues
-    // Use local date components instead of toISOString() to avoid UTC conversion
-    const formattedTrips = trips.map(trip => {
-      const formatDate = (date) => {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-      };
-      
-      return {
-        ...trip,
-        startDate: formatDate(trip.startDate),
-        endDate: formatDate(trip.endDate)
-      };
-    });
+    for (const doc of tripsSnapshot.docs) {
+      const trip = doc.data();
+      trip.tripId = doc.id;
 
-    res.status(200).json({ trips: formattedTrips });
+      // Format dates
+      trip.startDate = formatDateString(trip.startDate);
+      trip.endDate = formatDateString(trip.endDate);
+
+      // Fetch expenses to sum totalSpent
+      const expensesSnapshot = await db.collection("expenses").where("tripId", "==", trip.tripId).get();
+      let totalSpent = 0;
+      expensesSnapshot.forEach(exp => {
+        totalSpent += parseFloat(exp.data().amount || 0);
+      });
+      trip.totalSpent = totalSpent;
+
+      // Fetch itineraryItems count
+      const itinerarySnapshot = await db.collection("itinerary_items").where("tripId", "==", trip.tripId).get();
+      trip.itineraryCount = itinerarySnapshot.docs.length;
+
+      trips.push(trip);
+    }
+
+    // Sort by startDate ascending
+    trips.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+
+    res.status(200).json({ trips });
   } catch (err) {
     console.error("Error fetching trips:", err);
     res.status(500).json({ error: "Failed to fetch trips" });
@@ -42,37 +64,34 @@ const getUserTrips = async (req, res) => {
 // Get single trip details
 const getTripById = async (req, res) => {
   const { tripId } = req.params;
-  const userId = req.user.userId; // Get from JWT token
+  const userId = req.user.userId;
 
   try {
-    const [trips] = await pool.query(
-      `SELECT t.*, 
-        COALESCE(SUM(e.amount), 0) as totalSpent
-       FROM trips t
-       LEFT JOIN expenses e ON t.tripId = e.tripId
-       WHERE t.tripId = ? AND t.userId = ?
-       GROUP BY t.tripId`,
-      [tripId, userId]
-    );
+    const tripDoc = await db.collection("trips").doc(tripId).get();
 
-    if (trips.length === 0) {
+    if (!tripDoc.exists) {
       return res.status(404).json({ error: "Trip not found" });
     }
 
-    // Format dates to YYYY-MM-DD to avoid timezone issues
-    // Use local date components instead of toISOString() to avoid UTC conversion
-    const formatDate = (date) => {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    };
-    
-    const trip = {
-      ...trips[0],
-      startDate: formatDate(trips[0].startDate),
-      endDate: formatDate(trips[0].endDate)
-    };
+    const trip = tripDoc.data();
+    trip.tripId = tripDoc.id;
+
+    // Verify ownership
+    if (trip.userId !== userId) {
+      return res.status(403).json({ error: "Unauthorized access to trip details" });
+    }
+
+    // Format dates
+    trip.startDate = formatDateString(trip.startDate);
+    trip.endDate = formatDateString(trip.endDate);
+
+    // Sum expenses
+    const expensesSnapshot = await db.collection("expenses").where("tripId", "==", tripId).get();
+    let totalSpent = 0;
+    expensesSnapshot.forEach(exp => {
+      totalSpent += parseFloat(exp.data().amount || 0);
+    });
+    trip.totalSpent = totalSpent;
 
     res.status(200).json({ trip });
   } catch (err) {
@@ -83,49 +102,32 @@ const getTripById = async (req, res) => {
 
 // Create new trip
 const createTrip = async (req, res) => {
-  const userId = req.user.userId; // Get from JWT token
+  const userId = req.user.userId;
   const { destination, startDate, endDate, budget, description } = req.body;
 
   if (!destination || !startDate || !endDate) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
-  console.log('===== CREATE TRIP REQUEST =====');
-  console.log('Received startDate:', startDate);
-  console.log('Received endDate:', endDate);
-
   try {
-    const [result] = await pool.query(
-      `INSERT INTO trips (userId, destination, startDate, endDate, budget, description) 
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [userId, destination, startDate, endDate, budget || 0, description || '']
-    );
-
-    const [newTrip] = await pool.query(
-      'SELECT * FROM trips WHERE tripId = ?',
-      [result.insertId]
-    );
-
-    console.log('Saved trip startDate:', newTrip[0].startDate);
-    console.log('Saved trip endDate:', newTrip[0].endDate);
-
-    // Normalize dates to YYYY-MM-DD format using local date components
-    const formatDate = (date) => {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
+    const tripId = uuid();
+    const newTrip = {
+      userId,
+      destination,
+      startDate: formatDateString(startDate),
+      endDate: formatDateString(endDate),
+      budget: parseFloat(budget || 0),
+      description: description || '',
+      coverUrl: null,
+      createdAt: new Date().toISOString()
     };
-    
-    const normalizedTrip = {
-      ...newTrip[0],
-      startDate: formatDate(newTrip[0].startDate),
-      endDate: formatDate(newTrip[0].endDate)
-    };
+
+    await db.collection("trips").doc(tripId).set(newTrip);
+    newTrip.tripId = tripId;
 
     res.status(201).json({
       message: "Trip created successfully",
-      trip: normalizedTrip
+      trip: newTrip
     });
   } catch (err) {
     console.error("Error creating trip:", err);
@@ -136,50 +138,35 @@ const createTrip = async (req, res) => {
 // Update trip
 const updateTrip = async (req, res) => {
   const { tripId } = req.params;
-  const userId = req.user.userId; // Get from JWT token
+  const userId = req.user.userId;
   const { destination, startDate, endDate, budget, description } = req.body;
 
-  console.log('===== UPDATE TRIP REQUEST =====');
-  console.log('Received startDate:', startDate);
-  console.log('Received endDate:', endDate);
-
   try {
-    const [result] = await pool.query(
-      `UPDATE trips 
-       SET destination = ?, startDate = ?, endDate = ?, budget = ?, description = ?
-       WHERE tripId = ? AND userId = ?`,
-      [destination, startDate, endDate, budget, description, tripId, userId]
-    );
+    const tripDoc = await db.collection("trips").doc(tripId).get();
 
-    if (result.affectedRows === 0) {
+    if (!tripDoc.exists) {
       return res.status(404).json({ error: "Trip not found" });
     }
 
-    const [updatedTrip] = await pool.query(
-      'SELECT * FROM trips WHERE tripId = ?',
-      [tripId]
-    );
+    if (tripDoc.data().userId !== userId) {
+      return res.status(403).json({ error: "Unauthorized access to update trip" });
+    }
 
-    console.log('Updated trip startDate:', updatedTrip[0].startDate);
-    console.log('Updated trip endDate:', updatedTrip[0].endDate);
-
-    // Normalize dates to YYYY-MM-DD format using local date components
-    const formatDate = (date) => {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
+    const updatedTrip = {
+      destination,
+      startDate: formatDateString(startDate),
+      endDate: formatDateString(endDate),
+      budget: parseFloat(budget || 0),
+      description: description || ''
     };
+
+    await db.collection("trips").doc(tripId).update(updatedTrip);
     
-    const normalizedTrip = {
-      ...updatedTrip[0],
-      startDate: formatDate(updatedTrip[0].startDate),
-      endDate: formatDate(updatedTrip[0].endDate)
-    };
+    updatedTrip.tripId = tripId;
 
     res.status(200).json({
       message: "Trip updated successfully",
-      trip: normalizedTrip
+      trip: updatedTrip
     });
   } catch (err) {
     console.error("Error updating trip:", err);
@@ -190,16 +177,32 @@ const updateTrip = async (req, res) => {
 // Delete trip
 const deleteTrip = async (req, res) => {
   const { tripId } = req.params;
-  const userId = req.user.userId; // Get from JWT token
+  const userId = req.user.userId;
 
   try {
-    const [result] = await pool.query(
-      'DELETE FROM trips WHERE tripId = ? AND userId = ?',
-      [tripId, userId]
-    );
+    const tripDoc = await db.collection("trips").doc(tripId).get();
 
-    if (result.affectedRows === 0) {
+    if (!tripDoc.exists) {
       return res.status(404).json({ error: "Trip not found" });
+    }
+
+    if (tripDoc.data().userId !== userId) {
+      return res.status(403).json({ error: "Unauthorized access to delete trip" });
+    }
+
+    // Delete trip document
+    await db.collection("trips").doc(tripId).delete();
+
+    // Delete associated itinerary items
+    const itinerarySnapshot = await db.collection("itinerary_items").where("tripId", "==", tripId).get();
+    for (const doc of itinerarySnapshot.docs) {
+      await db.collection("itinerary_items").doc(doc.id).delete();
+    }
+
+    // Delete associated expenses
+    const expensesSnapshot = await db.collection("expenses").where("tripId", "==", tripId).get();
+    for (const doc of expensesSnapshot.docs) {
+      await db.collection("expenses").doc(doc.id).delete();
     }
 
     res.status(200).json({ message: "Trip deleted successfully" });
@@ -212,43 +215,45 @@ const deleteTrip = async (req, res) => {
 // Get itinerary items for a trip
 const getItineraryItems = async (req, res) => {
   const { tripId } = req.params;
-  const userId = req.user.userId; // Get from JWT token
+  const userId = req.user.userId;
 
   try {
-    // Verify trip belongs to user
-    const [trips] = await pool.query(
-      'SELECT tripId FROM trips WHERE tripId = ? AND userId = ?',
-      [tripId, userId]
-    );
+    // Check if trip belongs to user
+    const tripDoc = await db.collection("trips").doc(tripId).get();
+    let isAllowed = false;
 
-    if (trips.length === 0) {
-      return res.status(404).json({ error: "Trip not found" });
+    if (tripDoc.exists && tripDoc.data().userId === userId) {
+      isAllowed = true;
+    } else {
+      // If not the owner, check if the trip has been shared in the public feed
+      const publicTripDoc = await db.collection("public_trips").doc(tripId).get();
+      if (publicTripDoc.exists) {
+        isAllowed = true;
+      }
     }
 
-    const [items] = await pool.query(
-      `SELECT * FROM itinerary_items 
-       WHERE tripId = ? 
-       ORDER BY dayDate ASC, startTime ASC`,
-      [tripId]
-    );
+    if (!isAllowed) {
+      return res.status(403).json({ error: "Unauthorized access to itinerary items" });
+    }
 
-    // Format dates to YYYY-MM-DD to avoid timezone issues
-    // Use local date components instead of toISOString() to avoid UTC conversion
-    const formattedItems = items.map(item => {
-      const formatDate = (date) => {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-      };
-      
-      return {
-        ...item,
-        dayDate: formatDate(item.dayDate)
-      };
+    const itemsSnapshot = await db.collection("itinerary_items").where("tripId", "==", tripId).get();
+    const items = [];
+
+    itemsSnapshot.forEach(doc => {
+      const item = doc.data();
+      item.itemId = doc.id;
+      item.dayDate = formatDateString(item.dayDate);
+      items.push(item);
     });
 
-    res.status(200).json({ items: formattedItems });
+    // Sort by dayDate ascending, then startTime ascending
+    items.sort((a, b) => {
+      const dateDiff = new Date(a.dayDate) - new Date(b.dayDate);
+      if (dateDiff !== 0) return dateDiff;
+      return (a.startTime || '').localeCompare(b.startTime || '');
+    });
+
+    res.status(200).json({ items });
   } catch (err) {
     console.error("Error fetching itinerary items:", err);
     res.status(500).json({ error: "Failed to fetch itinerary items" });
@@ -258,61 +263,38 @@ const getItineraryItems = async (req, res) => {
 // Add itinerary item
 const addItineraryItem = async (req, res) => {
   const { tripId } = req.params;
-  const userId = req.user.userId; // Get from JWT token
-  const {
-    dayDate,
-    startTime,
-    placeName,
-    placeId,
-    placeAddress,
-    notes
-  } = req.body;
+  const userId = req.user.userId;
+  const { dayDate, startTime, placeName, placeId, placeAddress, notes } = req.body;
 
-  if (!userId || !dayDate || !placeName) {
+  if (!dayDate || !placeName) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
   try {
     // Verify trip belongs to user
-    const [trips] = await pool.query(
-      'SELECT tripId FROM trips WHERE tripId = ? AND userId = ?',
-      [tripId, userId]
-    );
-
-    if (trips.length === 0) {
+    const tripDoc = await db.collection("trips").doc(tripId).get();
+    if (!tripDoc.exists || tripDoc.data().userId !== userId) {
       return res.status(404).json({ error: "Trip not found" });
     }
 
-    const [result] = await pool.query(
-      `INSERT INTO itinerary_items 
-       (tripId, dayDate, startTime, placeName, placeId, placeAddress, notes) 
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [tripId, dayDate, startTime, placeName, placeId, placeAddress, notes]
-    );
-
-    const [newItem] = await pool.query(
-      'SELECT * FROM itinerary_items WHERE itemId = ?',
-      [result.insertId]
-    );
-
-    console.log('Created item:', newItem[0]);
-
-    // Format date to YYYY-MM-DD using local date components
-    const formatDate = (date) => {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
+    const itemId = uuid();
+    const itemData = {
+      tripId,
+      dayDate: formatDateString(dayDate),
+      startTime: startTime || null,
+      placeName,
+      placeId: placeId || null,
+      placeAddress: placeAddress || null,
+      notes: notes || '',
+      createdAt: new Date().toISOString()
     };
-    
-    const formattedItem = {
-      ...newItem[0],
-      dayDate: formatDate(newItem[0].dayDate)
-    };
+
+    await db.collection("itinerary_items").doc(itemId).set(itemData);
+    itemData.itemId = itemId;
 
     res.status(201).json({
       message: "Itinerary item added successfully",
-      item: formattedItem
+      item: itemData
     });
   } catch (err) {
     console.error("Error adding itinerary item:", err);
@@ -323,59 +305,37 @@ const addItineraryItem = async (req, res) => {
 // Update itinerary item
 const updateItineraryItem = async (req, res) => {
   const { tripId, itemId } = req.params;
-  const userId = req.user.userId; // Get from JWT token
-  const {
-    dayDate,
-    startTime,
-    placeName,
-    placeId,
-    placeAddress,
-    notes
-  } = req.body;
+  const userId = req.user.userId;
+  const { dayDate, startTime, placeName, placeId, placeAddress, notes } = req.body;
 
   try {
     // Verify trip belongs to user
-    const [trips] = await pool.query(
-      'SELECT tripId FROM trips WHERE tripId = ? AND userId = ?',
-      [tripId, userId]
-    );
-
-    if (trips.length === 0) {
+    const tripDoc = await db.collection("trips").doc(tripId).get();
+    if (!tripDoc.exists || tripDoc.data().userId !== userId) {
       return res.status(404).json({ error: "Trip not found" });
     }
 
-    const [result] = await pool.query(
-      `UPDATE itinerary_items 
-       SET dayDate = ?, startTime = ?, placeName = ?, placeId = ?, placeAddress = ?, notes = ?
-       WHERE itemId = ? AND tripId = ?`,
-      [dayDate, startTime, placeName, placeId, placeAddress, notes, itemId, tripId]
-    );
-
-    if (result.affectedRows === 0) {
+    const itemDoc = await db.collection("itinerary_items").doc(itemId).get();
+    if (!itemDoc.exists || itemDoc.data().tripId !== tripId) {
       return res.status(404).json({ error: "Itinerary item not found" });
     }
 
-    const [updatedItem] = await pool.query(
-      'SELECT * FROM itinerary_items WHERE itemId = ?',
-      [itemId]
-    );
+    const updatedData = {
+      dayDate: formatDateString(dayDate),
+      startTime: startTime || null,
+      placeName,
+      placeId: placeId || null,
+      placeAddress: placeAddress || null,
+      notes: notes || ''
+    };
 
-    // Normalize date to YYYY-MM-DD format using local date components
-    const formatDate = (date) => {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    };
-    
-    const normalizedItem = {
-      ...updatedItem[0],
-      dayDate: formatDate(updatedItem[0].dayDate)
-    };
+    await db.collection("itinerary_items").doc(itemId).update(updatedData);
+    updatedData.itemId = itemId;
+    updatedData.tripId = tripId;
 
     res.status(200).json({
       message: "Itinerary item updated successfully",
-      item: normalizedItem
+      item: updatedData
     });
   } catch (err) {
     console.error("Error updating itinerary item:", err);
@@ -386,27 +346,21 @@ const updateItineraryItem = async (req, res) => {
 // Delete itinerary item
 const deleteItineraryItem = async (req, res) => {
   const { tripId, itemId } = req.params;
-  const userId = req.user.userId; // Get from JWT token
+  const userId = req.user.userId;
 
   try {
     // Verify trip belongs to user
-    const [trips] = await pool.query(
-      'SELECT tripId FROM trips WHERE tripId = ? AND userId = ?',
-      [tripId, userId]
-    );
-
-    if (trips.length === 0) {
+    const tripDoc = await db.collection("trips").doc(tripId).get();
+    if (!tripDoc.exists || tripDoc.data().userId !== userId) {
       return res.status(404).json({ error: "Trip not found" });
     }
 
-    const [result] = await pool.query(
-      'DELETE FROM itinerary_items WHERE itemId = ? AND tripId = ?',
-      [itemId, tripId]
-    );
-
-    if (result.affectedRows === 0) {
+    const itemDoc = await db.collection("itinerary_items").doc(itemId).get();
+    if (!itemDoc.exists || itemDoc.data().tripId !== tripId) {
       return res.status(404).json({ error: "Itinerary item not found" });
     }
+
+    await db.collection("itinerary_items").doc(itemId).delete();
 
     res.status(200).json({ message: "Itinerary item deleted successfully" });
   } catch (err) {
@@ -418,52 +372,39 @@ const deleteItineraryItem = async (req, res) => {
 // Get expenses for a trip
 const getExpenses = async (req, res) => {
   const { tripId } = req.params;
-  const userId = req.user.userId; // Get from JWT token
+  const userId = req.user.userId;
 
   try {
     // Verify trip belongs to user
-    const [trips] = await pool.query(
-      'SELECT tripId FROM trips WHERE tripId = ? AND userId = ?',
-      [tripId, userId]
-    );
-
-    if (trips.length === 0) {
+    const tripDoc = await db.collection("trips").doc(tripId).get();
+    if (!tripDoc.exists || tripDoc.data().userId !== userId) {
       return res.status(404).json({ error: "Trip not found" });
     }
 
-    const [expenses] = await pool.query(
-      `SELECT * FROM expenses 
-       WHERE tripId = ? 
-       ORDER BY expenseDate DESC`,
-      [tripId]
-    );
+    const expensesSnapshot = await db.collection("expenses").where("tripId", "==", tripId).get();
+    const expenses = [];
+    const categoryTotalsMap = {};
 
-    // Get category totals
-    const [categoryTotals] = await pool.query(
-      `SELECT category, SUM(amount) as total 
-       FROM expenses 
-       WHERE tripId = ? 
-       GROUP BY category`,
-      [tripId]
-    );
+    expensesSnapshot.forEach(doc => {
+      const expense = doc.data();
+      expense.expenseId = doc.id;
+      expense.expenseDate = formatDateString(expense.expenseDate);
+      expenses.push(expense);
 
-    // Format dates to YYYY-MM-DD to avoid timezone issues
-    // Use local date components instead of toISOString() to avoid UTC conversion
-    const formattedExpenses = expenses.map(expense => {
-      const formatDate = (date) => {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-      };
-      
-      return {
-        ...expense,
-        expenseDate: formatDate(expense.expenseDate)
-      };
+      const cat = expense.category;
+      const amt = parseFloat(expense.amount || 0);
+      categoryTotalsMap[cat] = (categoryTotalsMap[cat] || 0) + amt;
     });
 
-    res.status(200).json({ expenses: formattedExpenses, categoryTotals });
+    const categoryTotals = Object.keys(categoryTotalsMap).map(category => ({
+      category,
+      total: categoryTotalsMap[category]
+    }));
+
+    // Sort expenses descending by expenseDate
+    expenses.sort((a, b) => new Date(b.expenseDate) - new Date(a.expenseDate));
+
+    res.status(200).json({ expenses, categoryTotals });
   } catch (err) {
     console.error("Error fetching expenses:", err);
     res.status(500).json({ error: "Failed to fetch expenses" });
@@ -473,7 +414,7 @@ const getExpenses = async (req, res) => {
 // Add expense
 const addExpense = async (req, res) => {
   const { tripId } = req.params;
-  const userId = req.user.userId; // Get from JWT token
+  const userId = req.user.userId;
   const { category, amount, description, expenseDate } = req.body;
 
   if (!category || !amount || !expenseDate) {
@@ -482,42 +423,27 @@ const addExpense = async (req, res) => {
 
   try {
     // Verify trip belongs to user
-    const [trips] = await pool.query(
-      'SELECT tripId FROM trips WHERE tripId = ? AND userId = ?',
-      [tripId, userId]
-    );
-
-    if (trips.length === 0) {
+    const tripDoc = await db.collection("trips").doc(tripId).get();
+    if (!tripDoc.exists || tripDoc.data().userId !== userId) {
       return res.status(404).json({ error: "Trip not found" });
     }
 
-    const [result] = await pool.query(
-      `INSERT INTO expenses (tripId, category, amount, description, expenseDate) 
-       VALUES (?, ?, ?, ?, ?)`,
-      [tripId, category, amount, description || '', expenseDate]
-    );
-
-    const [newExpense] = await pool.query(
-      'SELECT * FROM expenses WHERE expenseId = ?',
-      [result.insertId]
-    );
-
-    // Normalize date to YYYY-MM-DD format using local date components
-    const formatDate = (date) => {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
+    const expenseId = uuid();
+    const expenseData = {
+      tripId,
+      category,
+      amount: parseFloat(amount),
+      description: description || '',
+      expenseDate: formatDateString(expenseDate),
+      createdAt: new Date().toISOString()
     };
-    
-    const normalizedExpense = {
-      ...newExpense[0],
-      expenseDate: formatDate(newExpense[0].expenseDate)
-    };
+
+    await db.collection("expenses").doc(expenseId).set(expenseData);
+    expenseData.expenseId = expenseId;
 
     res.status(201).json({
       message: "Expense added successfully",
-      expense: normalizedExpense
+      expense: expenseData
     });
   } catch (err) {
     console.error("Error adding expense:", err);
@@ -528,32 +454,118 @@ const addExpense = async (req, res) => {
 // Delete expense
 const deleteExpense = async (req, res) => {
   const { tripId, expenseId } = req.params;
-  const userId = req.user.userId; // Get from JWT token
+  const userId = req.user.userId;
 
   try {
     // Verify trip belongs to user
-    const [trips] = await pool.query(
-      'SELECT tripId FROM trips WHERE tripId = ? AND userId = ?',
-      [tripId, userId]
-    );
-
-    if (trips.length === 0) {
+    const tripDoc = await db.collection("trips").doc(tripId).get();
+    if (!tripDoc.exists || tripDoc.data().userId !== userId) {
       return res.status(404).json({ error: "Trip not found" });
     }
 
-    const [result] = await pool.query(
-      'DELETE FROM expenses WHERE expenseId = ? AND tripId = ?',
-      [expenseId, tripId]
-    );
-
-    if (result.affectedRows === 0) {
+    const expenseDoc = await db.collection("expenses").doc(expenseId).get();
+    if (!expenseDoc.exists || expenseDoc.data().tripId !== tripId) {
       return res.status(404).json({ error: "Expense not found" });
     }
+
+    await db.collection("expenses").doc(expenseId).delete();
 
     res.status(200).json({ message: "Expense deleted successfully" });
   } catch (err) {
     console.error("Error deleting expense:", err);
     res.status(500).json({ error: "Failed to delete expense" });
+  }
+};
+
+// Upload cover photo
+const uploadCoverImage = async (req, res) => {
+  const { tripId } = req.params;
+  const userId = req.user.userId;
+
+  if (!req.file) {
+    return res.status(400).json({ error: "No file uploaded" });
+  }
+
+  try {
+    // Verify ownership
+    const tripDoc = await db.collection("trips").doc(tripId).get();
+    if (!tripDoc.exists || tripDoc.data().userId !== userId) {
+      return res.status(404).json({ error: "Trip not found" });
+    }
+
+    // Determine host URL dynamically from request headers
+    const hostUrl = `${req.protocol}://${req.get('host')}`;
+
+    // Upload to S3 (or local disk fallback)
+    const fileUrl = await uploadCoverPhoto(req.file, hostUrl);
+
+    // Save to Firestore
+    await db.collection("trips").doc(tripId).update({ coverUrl: fileUrl });
+
+    res.status(200).json({
+      message: "Cover photo uploaded successfully",
+      coverUrl: fileUrl
+    });
+  } catch (err) {
+    console.error("Error uploading cover image:", err);
+    res.status(500).json({ error: "Failed to upload cover image" });
+  }
+};
+
+// Share trip to community feed
+const shareTrip = async (req, res) => {
+  const { tripId } = req.params;
+  const userId = req.user.userId;
+
+  try {
+    const tripDoc = await db.collection("trips").doc(tripId).get();
+
+    if (!tripDoc.exists || tripDoc.data().userId !== userId) {
+      return res.status(404).json({ error: "Trip not found or unauthorized" });
+    }
+
+    const trip = tripDoc.data();
+    trip.tripId = tripDoc.id;
+
+    // Fetch user details for username
+    const userDoc = await db.collection("users").doc(userId).get();
+    const username = userDoc.exists ? userDoc.data().username : 'traveler';
+
+    // Fetch itinerary item count
+    const itinerarySnapshot = await db.collection("itinerary_items").where("tripId", "==", tripId).get();
+    const itineraryCount = itinerarySnapshot.docs.length;
+
+    const tripDataToShare = {
+      tripId: trip.tripId,
+      destination: trip.destination,
+      startDate: formatDateString(trip.startDate),
+      endDate: formatDateString(trip.endDate),
+      budget: trip.budget,
+      description: trip.description,
+      username: username,
+      coverUrl: trip.coverUrl || null,
+      itineraryCount: itineraryCount
+    };
+
+    await savePublicTrip(tripDataToShare);
+
+    res.status(200).json({
+      message: "Trip shared successfully with community!"
+    });
+  } catch (err) {
+    console.error("Error sharing trip:", err);
+    res.status(500).json({ error: "Failed to share trip" });
+  }
+};
+
+// Fetch list of public trips
+const getPublicTripsList = async (req, res) => {
+  try {
+    const publicTrips = await getPublicTrips();
+    res.status(200).json({ trips: publicTrips });
+  } catch (err) {
+    console.error("Error getting public trips:", err);
+    res.status(500).json({ error: "Failed to fetch public trips" });
   }
 };
 
@@ -569,5 +581,8 @@ module.exports = {
   deleteItineraryItem,
   getExpenses,
   addExpense,
-  deleteExpense
+  deleteExpense,
+  uploadCoverImage,
+  shareTrip,
+  getPublicTripsList
 };

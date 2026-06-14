@@ -10,6 +10,7 @@ const tripsSchemaCheck = async () => {
       endDate DATE NOT NULL,
       budget DECIMAL(10, 2) DEFAULT 0,
       description TEXT,
+      coverUrl VARCHAR(1000) DEFAULT NULL,
       createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (userId) REFERENCES users(userId) ON DELETE CASCADE
     )
@@ -46,6 +47,14 @@ const tripsSchemaCheck = async () => {
   try {
     await pool.execute(tripsTableQuery);
     console.log("Trips schema checked");
+
+    // Add coverUrl column if it doesn't exist for users with existing database tables
+    try {
+      await pool.execute("ALTER TABLE trips ADD COLUMN coverUrl VARCHAR(1000) DEFAULT NULL");
+      console.log("Added coverUrl column to trips table");
+    } catch (columnErr) {
+      // Column might already exist, swallow error
+    }
 
     await pool.execute(itineraryItemsTableQuery);
     console.log("Itinerary items schema checked");

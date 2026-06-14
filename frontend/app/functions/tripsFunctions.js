@@ -1,5 +1,5 @@
 import Constants from 'expo-constants';
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from "./secureStore";
 
 const API_URL = Constants.expoConfig.extra.API_URL;
 
@@ -328,6 +328,151 @@ export const deleteExpense = async (tripId, expenseId) => {
     }
   } catch (error) {
     console.error("Error deleting expense:", error);
+    throw error;
+  }
+};
+
+export const shareTrip = async (tripId) => {
+  try {
+    const token = await SecureStore.getItemAsync("token");
+    const response = await fetch(`${API_URL}/trips/${tripId}/share`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+    });
+
+    const data = await response.json();
+    if (response.ok) {
+      return data;
+    } else {
+      return { error: data.error || "Failed to share trip" };
+    }
+  } catch (error) {
+    console.error("Error sharing trip:", error);
+    throw error;
+  }
+};
+
+export const getPublicTrips = async () => {
+  try {
+    const token = await SecureStore.getItemAsync("token");
+    const response = await fetch(`${API_URL}/trips/public`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+    });
+
+    const data = await response.json();
+    if (response.ok) {
+      return data;
+    } else {
+      return { error: data.error || "Failed to fetch public trips" };
+    }
+  } catch (error) {
+    console.error("Error fetching public trips:", error);
+    throw error;
+  }
+};
+
+export const uploadTripCover = async (tripId, file) => {
+  try {
+    const token = await SecureStore.getItemAsync("token");
+    const formData = new FormData();
+    formData.append('cover', file);
+
+    const response = await fetch(`${API_URL}/trips/${tripId}/upload-cover`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`
+        // Do NOT set Content-Type header so the boundary is automatically set
+      },
+      body: formData,
+    });
+
+    const data = await response.json();
+    if (response.ok) {
+      return data;
+    } else {
+      return { error: data.error || "Failed to upload cover photo" };
+    }
+  } catch (error) {
+    console.error("Error uploading cover photo:", error);
+    throw error;
+  }
+};
+
+export const chatWithAI = async (message, conversationHistory) => {
+  try {
+    const token = await SecureStore.getItemAsync("token");
+    const response = await fetch(`${API_URL}/ai/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({ message, conversationHistory })
+    });
+
+    const data = await response.json();
+    if (response.ok) {
+      return data;
+    } else {
+      return { error: data.error || "Failed to get AI response" };
+    }
+  } catch (error) {
+    console.error("Error in chatWithAI:", error);
+    throw error;
+  }
+};
+
+export const generateItinerary = async (tripId, destination, days, budget, interests) => {
+  try {
+    const token = await SecureStore.getItemAsync("token");
+    const response = await fetch(`${API_URL}/ai/itinerary`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({ tripId, destination, days, budget, interests })
+    });
+
+    const data = await response.json();
+    if (response.ok) {
+      return data;
+    } else {
+      return { error: data.error || "Failed to generate itinerary" };
+    }
+  } catch (error) {
+    console.error("Error in generateItinerary:", error);
+    throw error;
+  }
+};
+
+export const generateCompleteTrip = async (conversationContext) => {
+  try {
+    const token = await SecureStore.getItemAsync("token");
+    const response = await fetch(`${API_URL}/ai/trip`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({ conversationContext })
+    });
+
+    const data = await response.json();
+    if (response.ok) {
+      return data;
+    } else {
+      return { error: data.error || "Failed to generate trip" };
+    }
+  } catch (error) {
+    console.error("Error in generateCompleteTrip:", error);
     throw error;
   }
 };

@@ -102,4 +102,26 @@ export const loginStyles = StyleSheet.create({
         fontSize: 15,
         fontWeight: "500",
     },
+    errorBox: {
+        backgroundColor: "#FEE2E2",
+        borderColor: "#FCA5A5",
+        borderWidth: 1,
+        borderRadius: 10,
+        padding: 12,
+        marginBottom: 15,
+        alignItems: "center",
+    },
+    errorText: {
+        color: "#B91C1C",
+        fontSize: 14,
+        fontWeight: "600",
+    },
+    warningText: {
+        color: "#D97706",
+        fontSize: 12,
+        fontWeight: "500",
+        marginTop: -10,
+        marginBottom: 10,
+        paddingLeft: 5,
+    },
 });

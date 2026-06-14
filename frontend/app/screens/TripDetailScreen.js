@@ -9,7 +9,7 @@ import {
   Alert,
 } from "react-native";
 import { useNavigation, useRoute, useFocusEffect } from "@react-navigation/native";
-import * as SecureStore from "expo-secure-store";
+import * as SecureStore from "../functions/secureStore";
 import { tripsStyles } from "../styles/TripsStyles";
 import {
   getTripById,

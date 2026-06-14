@@ -10,7 +10,7 @@ import {
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { tripsStyles } from "../styles/TripsStyles";
-import * as SecureStore from "expo-secure-store";
+import * as SecureStore from "../functions/secureStore";
 import { getFavoritePlacesDetails } from "../functions/googlePlacesFunction";
 import Constants from 'expo-constants';
 
