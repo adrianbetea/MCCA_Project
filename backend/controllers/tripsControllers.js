@@ -502,6 +502,16 @@ const uploadCoverImage = async (req, res) => {
     // Save to Firestore
     await db.collection("trips").doc(tripId).update({ coverUrl: fileUrl });
 
+    // Also update the public_trips document if this trip was shared
+    try {
+      const publicDoc = await db.collection("public_trips").doc(tripId).get();
+      if (publicDoc.exists) {
+        await db.collection("public_trips").doc(tripId).update({ coverUrl: fileUrl });
+      }
+    } catch (syncErr) {
+      console.error("Error syncing cover to public_trips:", syncErr);
+    }
+
     res.status(200).json({
       message: "Cover photo uploaded successfully",
       coverUrl: fileUrl

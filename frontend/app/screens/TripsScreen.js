@@ -128,7 +128,7 @@ export default function TripsScreen() {
             </Text>
           </View>
           <Text style={[tripsStyles.tripBudgetText, { fontSize: 12, color: '#999', marginBottom: 6 }]}>
-            Total Budget: ${totalBudget.toFixed(2)}
+            Total Budget: {totalBudget.toFixed(2)} RON
           </Text>
           <View style={tripsStyles.budgetProgressBar}>
             <View

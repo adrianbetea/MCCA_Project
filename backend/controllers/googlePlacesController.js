@@ -38,9 +38,13 @@ const getPlacePhotoUrl = async (req, res) => {
     }
 
     try {
-        // Redirect to the actual Google photo URL
+        // Proxy the image through the backend instead of redirecting
         const photoUrl = `${BASE_URL}/photo?maxwidth=${maxWidth}&maxheight=${maxHeight}&photoreference=${photoReference}&key=${GOOGLE_PLACES_API_KEY}`;
-        res.redirect(photoUrl);
+        const response = await axios.get(photoUrl, { responseType: 'arraybuffer' });
+        
+        res.set('Content-Type', response.headers['content-type'] || 'image/jpeg');
+        res.set('Cache-Control', 'public, max-age=86400'); // Cache for 24h
+        res.send(response.data);
     } catch (error) {
         console.error("Error fetching photo:", error);
         res.status(500).json({ error: "Failed to fetch photo" });

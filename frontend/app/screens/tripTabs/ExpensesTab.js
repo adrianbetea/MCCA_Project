@@ -106,7 +106,7 @@ export default function ExpensesTab({
               { color: remaining < 0 ? '#f44336' : '#4CAF50' }
             ]}
           >
-            ${remaining.toFixed(2)}
+            {remaining.toFixed(2)} RON
           </Text>
         </View>
 

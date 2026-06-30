@@ -179,7 +179,7 @@ export default function OverviewTab({ trip, userId, onUpdate, onDelete }) {
               { color: budgetRemaining < 0 ? '#f44336' : '#4CAF50' }
             ]}
           >
-            ${budgetRemaining.toFixed(2)}
+            {budgetRemaining.toFixed(2)} RON
           </Text>
         </View>
 
